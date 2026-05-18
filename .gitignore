@@ -4,3 +4,4 @@ platformio.ini
 lib
 include
 test
+.workspace
