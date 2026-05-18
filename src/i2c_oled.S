@@ -1,3 +1,5 @@
+.global oled_set_cursor
+
 #include <avr/io.h>
 #include "definitions.inc"
 
@@ -54,13 +56,43 @@ oled_command:
 
 oled_init:
     rcall i2c_init
-    ldi argument, 0xAE
+    ldi argument, 0xAE ;display OFF
     rcall oled_command
-    ldi argument, 0x8D
+    ldi argument, 0x20 ;memory addressing mode
+    rcall oled_command
+    ldi argument, 0x02 ;page addressing mode
+    rcall oled_command
+    ldi argument, 0xB0 ;page 0
+    rcall oled_command
+    ldi argument, 0x00 ;lower column = 0
+    rcall oled_command
+    ldi argument, 0x10 ;higher column = 0
+    rcall oled_command
+    ldi argument, 0x40 ;start line = 0
+    rcall oled_command
+    ldi argument, 0xA1 ;segment remap
+    rcall oled_command
+    ldi argument, 0xC8 ;COM scan direction
+    rcall oled_command
+    ldi argument, 0xA6 ;normal display
+    rcall oled_command
+    ldi argument, 0xA8 ;multiplex ratio
+    rcall oled_command
+    ldi argument, 0x3F
+    rcall oled_command
+    ldi argument, 0xD3 ;display offset
+    rcall oled_command
+    ldi argument, 0x00
+    rcall oled_command
+    ldi argument, 0x81 ;contrast
+    rcall oled_command
+    ldi argument, 0x7F
+    rcall oled_command
+    ldi argument, 0x8D ;charge pump
     rcall oled_command
     ldi argument, 0x14
     rcall oled_command
-    ldi argument, 0xAF
+    ldi argument, 0xAF ;display ON
     rcall oled_command
     ret
 
@@ -106,6 +138,27 @@ print_loop:
     brne print_loop
     ldi argument, 0x00
     rcall oled_data
+    ret
+
+; input:
+; argument = page OLED, contoh 0xB0 untuk baris/page 0
+; r22 = column, contoh 0 untuk kolom paling kiri
+oled_set_cursor:
+    ; set page
+    rcall oled_command
+    ; set lower column nibble
+    mov temp, r22
+    andi temp, 0x0F
+    mov argument, temp
+    rcall oled_command
+    ; set higher column nibble
+    mov temp, r22
+    swap temp
+    andi temp, 0x0F
+    ori temp, 0x10
+    mov argument, temp
+    rcall oled_command
+
     ret
 
 .section .progmem

@@ -36,8 +36,9 @@ show_waiting:
     rcall oled_clear
     
     ; --- TAMPILKAN "WAIT" ---
-    ldi argument, 0xB0      ; Baris 1
-    rcall oled_command
+    ldi argument, 0xB0      ; Page 0
+    ldi r22, 0              ; Column 0
+    rcall oled_set_cursor
     ldi r30, lo8(font_waiting)
     ldi r31, hi8(font_waiting)
     rcall oled_print_char   ; W
@@ -46,12 +47,20 @@ show_waiting:
     rcall oled_print_char   ; T
 
     ; --- TAMPILKAN SKOR TERAKHIR ---
-    ldi argument, 0xB1      ; Pindah ke Baris 2 (Page 1)
-    rcall oled_command
+    ldi argument, 0xB1      ; Page 1
+    ldi r22, 0              ; Column 0
+    rcall oled_set_cursor
 
     ldi r24, 0              ; Alamat EEPROM 0
     rcall eeprom_read       ; Hasil skor di r24
-    
+
+    ; Validasi EEPROM:
+    ; Kalau nilai EEPROM > 30, anggap belum ada skor, jadikan 0
+    cpi r24, 31
+    brlo eeprom_score_valid
+    clr r24
+
+    eeprom_score_valid:
     rcall bcd_convert       ; r24 = Puluhan, r22 = Satuan
     
     push r22                ; Simpan Satuan ke stack
@@ -63,27 +72,21 @@ show_waiting:
 
     rjmp game_loop
 
-; Rutin pembantu untuk mengarahkan ke font angka
-; --- Rutin untuk menampilkan angka 0-9 ---
-; Input: r24 (Angka 0-9 yang ingin ditampilkan)
+; untuk mengarahkan ke font angka
 display_digit:
     push r30
     push r31
     push r24
     push r25
-
-    ; Hitung Offset: Alamat = font_numbers + (angka * 5)
+    ; hitung offset: alamat = font_numbers + (angka * 5)
     ldi r30, lo8(font_numbers)
     ldi r31, hi8(font_numbers)
-    
-    ldi r25, 5          ; Tiap angka lebarnya 5 byte
-    mul r24, r25        ; r1:r0 = angka * 5
-    add r30, r0         ; Tambahkan offset ke Z pointer
+    ldi r25, 5 ; tiap angka lebarnya 5 byte
+    mul r24, r25 ; r1:r0 = angka * 5
+    add r30, r0 ; tambahkan offset ke Z pointer
     adc r31, r1
-    clr r0              ; Bersihkan r0 (karena r0 digunakan oleh instruksi mul)
-    
-    rcall oled_print_char ; Cetak karakter berdasarkan Z pointer
-    
+    clr r1 ; bersihkan r1
+    rcall oled_print_char ; cetak karakter berdasarkan Z pointer
     pop r25
     pop r24
     pop r31
@@ -106,7 +109,8 @@ check_strike:
     
     rcall oled_clear
     ldi argument, 0xB0
-    rcall oled_command
+    ldi r22, 0
+    rcall oled_set_cursor
     ldi r30, lo8(font_strike)
     ldi r31, hi8(font_strike)
     rcall oled_print_char   ; S, T, R
@@ -140,12 +144,9 @@ win_game:
     
     rcall oled_clear        
     
-    ldi argument, 0xB0      ; Page 0
-    rcall oled_command
-    ldi argument, 0x00      ; Set Lower Column Address to 0
-    rcall oled_command
-    ldi argument, 0x10      ; Set Higher Column Address to 0 (PENTING)
-    rcall oled_command
+    ldi argument, 0xB0
+    ldi r22, 0
+    rcall oled_set_cursor
 
     ldi r30, lo8(font_WIN)
     ldi r31, hi8(font_WIN)
