@@ -1,4 +1,5 @@
 .vscode
+.pio
 platformio.ini
 lib
 include
