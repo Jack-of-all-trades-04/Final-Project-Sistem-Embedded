@@ -158,12 +158,19 @@ win_game:
     mov r22, score
     rcall eeprom_write
 
-    ; Perpanjang Delay: Gunakan register 16 bit untuk delay yang lebih lama
-    ldi r24, lo8(40000)
-    ldi r25, hi8(40000)
-delay_long:
-    sbiw r24, 1
-    brne delay_long
+    ; Delay ~1 detik agar layar WIN sempat terbaca
+    ; 1 detik @ 16MHz = 16.000.000 siklus
+    ; Loop luar x loop dalam: 250 x 16000 = 4.000.000 iterasi x 4 siklus = ~1 detik
+    ldi r25, 250            ; Loop luar (r25)
+delay_outer:
+    ldi r24, lo8(16000)     ; Loop dalam low byte
+    ldi temp, hi8(16000)    ; Loop dalam high byte (pakai temp/r16 sebagai hi)
+delay_inner:
+    subi r24, 1
+    sbci temp, 0
+    brne delay_inner
+    dec r25
+    brne delay_outer
 
     rjmp show_waiting
 

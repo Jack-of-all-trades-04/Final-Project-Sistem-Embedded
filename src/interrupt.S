@@ -2,18 +2,16 @@
 #include "definitions.inc"
 
 ; =============================================================
-; INTERRUPT VECTOR TABLE
-; ATMega328P: Setiap vektor = 4 byte (2 word)
-; Reset   = 0x0000
-; INT0    = 0x0004
-; INT1    = 0x0008
+; INTERRUPT VECTOR TABLE - ATMega328P
+; Setiap vektor = 2 byte (1 word)
+; Reset = 0x0000, INT0 = 0x0002, INT1 = 0x0004
 ; =============================================================
 .section .vectors
     rjmp reset_handler          ; 0x0000: Reset
+    .org 0x0002
+    rjmp int0_handler           ; 0x0002: INT0 (Encoder CLK / A → D2)
     .org 0x0004
-    rjmp int0_handler           ; 0x0004: INT0 (Encoder CLK / A → D2)
-    .org 0x0008
-    rjmp int1_handler           ; 0x0008: INT1 (Encoder DT / B → D3)
+    rjmp int1_handler           ; 0x0004: INT1 (Encoder DT / B → D3)
 
 .section .text
 .global int0_handler
@@ -26,7 +24,7 @@ reset_handler:
 
 ; --- 1. Inisialisasi Interrupt ---
 interrupt_init:
-    ; Set D2 dan D3 sebagai INPUT terlebih dahulu
+    ; Set D2 dan D3 sebagai INPUT
     cbi _SFR_IO_ADDR(DDRD), 2   ; D2 = INPUT (CLK Encoder)
     cbi _SFR_IO_ADDR(DDRD), 3   ; D3 = INPUT (DT Encoder)
 
@@ -54,14 +52,30 @@ int0_handler:
     push temp
     in temp, _SFR_IO_ADDR(SREG)
     push temp
+    push r24
+    push r25
 
     ; Hanya hitung skor jika sedang dalam mode FIGHT (state = 1)
     cpi state, 1
     brne int0_exit
 
-    inc score                   ; Tambah skor +1 per putaran
+    ; --- DEBOUNCE: Tunggu ~10ms lalu cek apakah D2 masih LOW ---
+    ; 10ms @ 16MHz = 160.000 siklus, loop 4 siklus = 40.000 iterasi
+    ldi r24, lo8(40000)
+    ldi r25, hi8(40000)
+debounce_wait:
+    sbiw r24, 1
+    brne debounce_wait
+
+    ; Setelah delay, cek apakah D2 masih LOW (bukan noise/bounce)
+    sbic _SFR_IO_ADDR(PIND), 2  ; Skip jika D2 LOW (valid pulse)
+    rjmp int0_exit              ; D2 sudah HIGH lagi = bounce, abaikan
+
+    inc score                   ; Tambah skor +1 (pulse valid)
 
 int0_exit:
+    pop r25
+    pop r24
     pop temp
     out _SFR_IO_ADDR(SREG), temp
     pop temp
