@@ -1,7 +1,7 @@
 .vscode
 .pio
 platformio.ini
-lib
 include
 test
-.workspace
+*.workspace
+*.pdsbak

@@ -21,4 +21,4 @@
 #define argument  r17
 #define state     r18
 #define score     r19
-#define counter   r20
+#define last_enc  r21 

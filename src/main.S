@@ -5,200 +5,257 @@
 .global main
 
 main:
-    ; --- 1. Inisialisasi Stack & I/O Dasar ---
     ldi temp, lo8(RAMEND)
     out _SFR_IO_ADDR(SPL), temp
     ldi temp, hi8(RAMEND)
-    out _SFR_IO_ADDR(SPH), temp
+    out _SFR_IO_ADDR(SPH) , temp
 
-    ; Set PB0 (LED) sebagai Output dan matikan di awal
-    sbi _SFR_IO_ADDR(DDRB), 0
-    cbi _SFR_IO_ADDR(PORTB), 0
-
-    ; --- 2. Inisialisasi Modul ---
-    rcall pwm_init          ; Inisialisasi Timer PWM
-    rcall motor_stop        ; MOTOR MATI TOTAL
+    rcall pwm_init          
+    rcall motor_stop        
     rcall oled_init
     rcall oled_clear
-    rcall interrupt_init    ; Aktifkan Interrupt & Pull-ups
-
+    
+    ; Inisialisasi Pin Encoder sebagai Input dengan Pull-up
+    cbi _SFR_IO_ADDR(DDRD), ENC_A
+    sbi _SFR_IO_ADDR(PORTD), ENC_A
+    
     ldi state, 0
     clr score
+    clr last_enc       
 
-; main.S - Bagian show_waiting
 show_waiting:
     ldi state, 0
     clr score
-    cbi _SFR_IO_ADDR(PORTB), 0 
-    rcall motor_stop           
-    rcall buzzer_off
-
-    rcall oled_clear
+    rcall process_escape_logic ; Gunakan fungsi faktorisasi
     
-    ; --- TAMPILKAN "WAIT" ---
-    ldi argument, 0xB0      ; Page 0
-    ldi r22, 0              ; Column 0
+    ; Tampilkan UI WAIT
+    ldi argument, 0xB0
+    ldi r22, 0
     rcall oled_set_cursor
     ldi r30, lo8(font_waiting)
     ldi r31, hi8(font_waiting)
-    rcall oled_print_char   ; W
-    rcall oled_print_char   ; A
-    rcall oled_print_char   ; I
-    rcall oled_print_char   ; T
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
 
-    ; --- TAMPILKAN SKOR TERAKHIR ---
-    ldi argument, 0xB1      ; Page 1
-    ldi r22, 0              ; Column 0
+    ; Baris 2: "Your Score:" (Page 1)
+    ldi argument, 0xB1      ; Page 1 (Baris Baru)
+    ldi r22, 0
     rcall oled_set_cursor
+    ldi r30, lo8(font_your_score)
+    ldi r31, hi8(font_your_score)
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
 
-    ldi r24, 0              ; Alamat EEPROM 0
-    rcall eeprom_read       ; Hasil skor di r24
-
-    ; Validasi EEPROM:
-    ; Kalau nilai EEPROM > 30, anggap belum ada skor, jadikan 0
-    cpi r24, 31
-    brlo eeprom_score_valid
+    ; Baca EEPROM untuk total tangkapan
+    ldi r24, 0
+    rcall eeprom_read
+    mov r23, r24            ; r23 sebagai akumulator total
+    cpi r24, 255
+    brne display_wait_score
     clr r24
+display_wait_score:
+    rcall bcd_convert
+    rcall display_digit     ; Puluhan
+    mov r24, r22
+    rcall display_digit     ; Satuan
 
-    eeprom_score_valid:
-    rcall bcd_convert       ; r24 = Puluhan, r22 = Satuan
+game_loop:
+    tst state
+    breq check_strike
+    rjmp fight_logic
     
-    push r22                ; Simpan Satuan ke stack
-    mov r24, r24            ; Register r24 sudah berisi Puluhan
-    rcall display_digit     ; Tampilkan Puluhan
+fight_logic:
+    ; --- 1. DETEKSI ENCODER (POLLING) ---
+    ; Kita mencari kondisi "Falling Edge" (dari HIGH ke LOW)
+    in temp, _SFR_IO_ADDR(PIND)
+    andi temp, (1 << ENC_A) ; Isolasi pin D2
     
-    pop r24                 ; Ambil Satuan dari stack ke r24
-    rcall display_digit     ; Tampilkan Satuan
+    cp temp, last_enc       ; Bandingkan dengan status sebelumnya
+    breq skip_encoder       ; Jika tidak ada perubahan, skip
+    
+    mov last_enc, temp      ; Simpan status sekarang untuk loop depan
+    
+    tst temp                ; Apakah sekarang LOW? (Falling Edge)
+    brne skip_encoder
+    
+    ; Jika terjadi putaran (D2 pindah ke LOW):
+    subi score, 5           ; Jarak mendekat ke user
+    brcc skip_encoder
+    ldi score, 5            ; Batas minimum
+skip_encoder:
+    ; --- 2. LOGIKA IKAN (DELAY & PULL) ---
+    ldi r24, lo8(50000)     ; Sesuaikan kecepatan ikan di sini
+    ldi r25, hi8(50000)
+delay_fight:
+    sbiw r24, 1
+    brne delay_fight
+
+    inc score               ; Ikan menjauh secara otomatis
+
+    ; --- 3. CEK MENANG / KALAH ---
+    rcall check_game_status 
+    brcs do_win             ; Carry = Menang (score <= 10)
+    breq do_escape          ; Zero = Lepas (score >= 100)
+    
+    ldi argument, 0xB0      ; Page 1 (Baris Baru)
+    ldi r22, 0
+    rcall oled_set_cursor
+    ldi r30, lo8(font_strike)
+    ldi r31, hi8(font_strike)
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+
+    ; --- 4. UPDATE OLED ---
+
+    ldi argument, 0xB2
+    ldi r22, 0
+    rcall oled_set_cursor
+    ldi r30, lo8(font_distance)
+    ldi r31, hi8(font_distance)
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    mov r24, score
+    rcall bcd_convert
+    rcall display_digit     ; Puluhan
+    mov r24, r22
+    rcall display_digit     ; Satuan
 
     rjmp game_loop
 
-; untuk mengarahkan ke font angka
+check_strike:
+    sbis _SFR_IO_ADDR(PIND), TOUCH_PIN 
+    rjmp game_loop
+    
+    ; Transisi ke STRIKE
+    ldi state, 1
+    ldi score, 50           ; Jarak awal
+    rcall oled_clear
+
+    ldi r30, lo8(font_strike)
+    ldi r31, hi8(font_strike)
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall oled_print_char
+    rcall motor_set_speed
+    rcall buzzer_on
+    
+    rjmp game_loop
+
+do_win:
+    rcall process_win_logic
+    inc r23                 ; Tambah total tangkapan
+    ldi r24, 0
+    mov r22, r23
+    rcall eeprom_write
+delay_w: 
+    sbiw r24, 1
+    rjmp show_waiting
+
+do_escape:
+    rcall process_escape_logic
+    rjmp show_waiting
+
+; --- Fungsi Utility ---
 display_digit:
     push r30
     push r31
     push r24
     push r25
-    ; hitung offset: alamat = font_numbers + (angka * 5)
     ldi r30, lo8(font_numbers)
     ldi r31, hi8(font_numbers)
-    ldi r25, 5 ; tiap angka lebarnya 5 byte
-    mul r24, r25 ; r1:r0 = angka * 5
-    add r30, r0 ; tambahkan offset ke Z pointer
+    ldi r25, 5
+    mul r24, r25
+    add r30, r0
     adc r31, r1
-    clr r1 ; bersihkan r1
-    rcall oled_print_char ; cetak karakter berdasarkan Z pointer
+    clr r1
+    rcall oled_print_char
     pop r25
     pop r24
     pop r31
     pop r30
     ret
 
-game_loop:
-    tst state
-    breq check_strike
-    rjmp check_fight
-
-check_strike:
-    ; Cek sensor pada PIN D4 (TOUCH_PIN)
-    sbis _SFR_IO_ADDR(PIND), TOUCH_PIN 
-    rjmp game_loop
-
-    ; --- 3. Mekanisme STRIKE ---
-    ldi state, 1
-    sbi _SFR_IO_ADDR(PORTB), 0 ; NYALAKAN LED saat Strike (Tanda Fight dimulai)
-    
-    rcall oled_clear
-    ldi argument, 0xB0
-    ldi r22, 0
-    rcall oled_set_cursor
-    ldi r30, lo8(font_strike)
-    ldi r31, hi8(font_strike)
-    rcall oled_print_char   ; S, T, R
-    rcall oled_print_char
-    rcall oled_print_char
-    rcall oled_print_char
-    rcall oled_print_char
-    rcall oled_print_char
-
-    ldi argument, 180       ; Nyalakan motor perlawanan
-    rcall motor_set_speed
-    
-    rcall buzzer_on
-    rjmp game_loop
-
-check_fight:
-    ; Indikasi visual: Nyalakan LED PB0 jika skor > 0
-    tst score
-    breq no_led
-    sbi _SFR_IO_ADDR(PORTB), 0
-no_led:
-
-    rcall check_game_status 
-    brcs win_game           ; Jika skor >= 30, menang
-    rjmp game_loop
-
-win_game:
-    rcall motor_stop
-    rcall buzzer_off
-    cbi _SFR_IO_ADDR(PORTB), 0 
-    
-    rcall oled_clear        
-    
-    ldi argument, 0xB0
-    ldi r22, 0
-    rcall oled_set_cursor
-
-    ldi r30, lo8(font_WIN)
-    ldi r31, hi8(font_WIN)
-    rcall oled_print_char   ; W
-    rcall oled_print_char   ; I
-    rcall oled_print_char   ; N
-
-    ; EEPROM
-    ldi r24, 0
-    mov r22, score
-    rcall eeprom_write
-
-    ; Perpanjang Delay: Gunakan register 16 bit untuk delay yang lebih lama
-    ldi r24, lo8(40000)
-    ldi r25, hi8(40000)
-delay_long:
-    sbiw r24, 1
-    brne delay_long
-
-    rjmp show_waiting
-
-; --- 5. Data Font Tambahan ---
+; --- Data Font ---
 .section .progmem
-font_waiting:
-.byte 0x7F, 0x20, 0x18, 0x20, 0x7F ; W
-.byte 0x7E, 0x11, 0x11, 0x11, 0x7E ; A
-.byte 0x00, 0x41, 0x7F, 0x41, 0x00 ; I
-.byte 0x01, 0x01, 0x7F, 0x01, 0x01 ; T
-
-font_strike:
-.byte 0x26, 0x49, 0x49, 0x49, 0x32 ; S
-.byte 0x01, 0x01, 0x7F, 0x01, 0x01 ; T
-.byte 0x7F, 0x09, 0x19, 0x29, 0x46 ; R
-.byte 0x00, 0x41, 0x7F, 0x41, 0x00 ; I
-.byte 0x7F, 0x08, 0x14, 0x22, 0x41 ; K
-.byte 0x7F, 0x49, 0x49, 0x49, 0x41 ; E
-
-font_WIN:
-.byte 0x7F, 0x20, 0x18, 0x20, 0x7F ; W
-.byte 0x00, 0x41, 0x7F, 0x41, 0x00 ; I
-.byte 0x7F, 0x04, 0x08, 0x10, 0x7F ; N
+font_waiting: .byte 0x7F, 0x20, 0x18, 0x20, 0x7F, 0x7E, 0x11, 0x11, 0x11, 0x7E, 0x00, 0x41, 0x7F, 0x41, 0x00, 0x01, 0x01, 0x7F, 0x01, 0x01
+font_strike:  .byte 0x26, 0x49, 0x49, 0x49, 0x32, 0x01, 0x01, 0x7F, 0x01, 0x01, 0x7F, 0x09, 0x19, 0x29, 0x46, 0x00, 0x41, 0x7F, 0x41, 0x00, 0x7F, 0x08, 0x14, 0x22, 0x41, 0x7F, 0x49, 0x49, 0x49, 0x41
+font_your_score:
+    ; Y
+    .byte 0x03, 0x04, 0x78, 0x04, 0x03
+    ; o
+    .byte 0x38, 0x44, 0x44, 0x44, 0x38
+    ; u
+    .byte 0x3C, 0x40, 0x40, 0x20, 0x7C
+    ; r
+    .byte 0x7C, 0x08, 0x04, 0x04, 0x08
+    ; (Spasi)
+    .byte 0x00, 0x00, 0x00, 0x00, 0x00
+    ; S
+    .byte 0x26, 0x49, 0x49, 0x49, 0x32
+    ; c
+    .byte 0x38, 0x44, 0x44, 0x44, 0x20
+    ; o
+    .byte 0x38, 0x44, 0x44, 0x44, 0x38
+    ; r
+    .byte 0x7C, 0x08, 0x04, 0x04, 0x08
+    ; e
+    .byte 0x38, 0x54, 0x54, 0x54, 0x18
+    ; :
+    .byte 0x00, 0x36, 0x36, 0x00, 0x00
 
 font_numbers:
-; Pola angka 0-9 (Lebar 5 pixel per karakter)
-font_0: .byte 0x3E, 0x51, 0x49, 0x45, 0x3E
-font_1: .byte 0x00, 0x42, 0x7F, 0x40, 0x00
-font_2: .byte 0x42, 0x61, 0x51, 0x49, 0x46
-font_3: .byte 0x21, 0x41, 0x45, 0x4B, 0x31
-font_4: .byte 0x18, 0x14, 0x12, 0x7F, 0x10
-font_5: .byte 0x27, 0x45, 0x45, 0x45, 0x39
-font_6: .byte 0x3C, 0x4A, 0x49, 0x49, 0x30
-font_7: .byte 0x01, 0x71, 0x09, 0x05, 0x03
-font_8: .byte 0x36, 0x49, 0x49, 0x49, 0x36
-font_9: .byte 0x06, 0x49, 0x49, 0x29, 0x1E
-font_colon: .byte 0x00, 0x36, 0x36, 0x00, 0x00 ; Titik dua (:)
+    .byte 0x3E, 0x51, 0x49, 0x45, 0x3E ; 0
+    .byte 0x00, 0x42, 0x7F, 0x40, 0x00 ; 1
+    .byte 0x42, 0x61, 0x51, 0x49, 0x46 ; 2
+    .byte 0x21, 0x41, 0x45, 0x4B, 0x31 ; 3
+    .byte 0x18, 0x14, 0x12, 0x7F, 0x10 ; 4
+    .byte 0x27, 0x45, 0x45, 0x45, 0x39 ; 5
+    .byte 0x3C, 0x4A, 0x49, 0x49, 0x30 ; 6
+    .byte 0x01, 0x71, 0x09, 0x05, 0x03 ; 7
+    .byte 0x36, 0x49, 0x49, 0x49, 0x36 ; 8
+    .byte 0x06, 0x49, 0x49, 0x29, 0x1E ; 9
+
+font_distance:
+    ; D
+    .byte 0x7F, 0x41, 0x41, 0x22, 0x1C
+    ; i
+    .byte 0x00, 0x44, 0x7D, 0x40, 0x00
+    ; s
+    .byte 0x48, 0x54, 0x54, 0x54, 0x20
+    ; t
+    .byte 0x04, 0x3F, 0x44, 0x40, 0x20
+    ; a
+    .byte 0x20, 0x54, 0x54, 0x54, 0x78
+    ; n
+    .byte 0x7C, 0x08, 0x04, 0x04, 0x78
+    ; c
+    .byte 0x38, 0x44, 0x44, 0x44, 0x20
+    ; e
+    .byte 0x38, 0x54, 0x54, 0x54, 0x18
+    ; :
+    .byte 0x00, 0x36, 0x36, 0x00, 0x00
