@@ -56,43 +56,37 @@ oled_command:
 
 oled_init:
     rcall i2c_init
-    ldi argument, 0xAE ;display OFF
+    ldi argument, 0xAE ; display OFF
     rcall oled_command
-    ldi argument, 0x20 ;memory addressing mode
+    ldi argument, 0xA8 ; Set Multiplex Ratio
     rcall oled_command
-    ldi argument, 0x02 ;page addressing mode
+    ldi argument, 0x1F ; 31 (berarti 32 baris untuk 128x32)
     rcall oled_command
-    ldi argument, 0xB0 ;page 0
+    ldi argument, 0xD3 ; Set Display Offset
     rcall oled_command
-    ldi argument, 0x00 ;lower column = 0
+    ldi argument, 0x00 ; no offset
     rcall oled_command
-    ldi argument, 0x10 ;higher column = 0
+    ldi argument, 0x40 ; Set Display Start Line = 0
     rcall oled_command
-    ldi argument, 0x40 ;start line = 0
+    ldi argument, 0xDA ; Set COM Pins Hardware Configuration
     rcall oled_command
-    ldi argument, 0xA1 ;segment remap
+    ldi argument, 0x02 ; Penting untuk 128x32
     rcall oled_command
-    ldi argument, 0xC8 ;COM scan direction
-    rcall oled_command
-    ldi argument, 0xA6 ;normal display
-    rcall oled_command
-    ldi argument, 0xA8 ;multiplex ratio
-    rcall oled_command
-    ldi argument, 0x3F
-    rcall oled_command
-    ldi argument, 0xD3 ;display offset
-    rcall oled_command
-    ldi argument, 0x00
-    rcall oled_command
-    ldi argument, 0x81 ;contrast
+    ldi argument, 0x81 ; Contrast
     rcall oled_command
     ldi argument, 0x7F
     rcall oled_command
-    ldi argument, 0x8D ;charge pump
+    ldi argument, 0xA1 ; Segment remap
+    rcall oled_command
+    ldi argument, 0xC8 ; COM scan direction
+    rcall oled_command
+    ldi argument, 0xA6 ; Normal display
+    rcall oled_command
+    ldi argument, 0x8D ; Charge pump
     rcall oled_command
     ldi argument, 0x14
     rcall oled_command
-    ldi argument, 0xAF ;display ON
+    ldi argument, 0xAF ; Display ON
     rcall oled_command
     ret
 

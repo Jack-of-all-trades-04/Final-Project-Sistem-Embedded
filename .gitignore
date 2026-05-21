@@ -1,6 +1,5 @@
 .vscode
 .pio
-platformio.ini
 include
 test
 *.workspace

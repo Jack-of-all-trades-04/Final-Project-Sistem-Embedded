@@ -14,6 +14,7 @@ main:
     rcall motor_stop        
     rcall oled_init
     rcall oled_clear
+    rcall buzzer_init
     
     ; Inisialisasi Pin Encoder sebagai Input dengan Pull-up
     cbi _SFR_IO_ADDR(DDRD), ENC_A
@@ -93,10 +94,25 @@ fight_logic:
     subi score, 5           ; Jarak mendekat ke user
     brcc skip_encoder
     ldi score, 5            ; Batas minimum
+    ; --- 2. LOGIKA IKAN & BUZZER MENEGANGKAN ---
+    ; Kita buat frekuensi berbanding lurus dengan jarak (score)
+    ; Semakin besar score (ikan kabur), nada semakin melengking
+    mov r24, score
+    ldi r25, 0
+    ; Nilai OCR1B kecil = Frekuensi Tinggi
+    ; Kita gunakan rumus sederhana: 2000 - (score * 10)
+    ldi r20, 10
+    mul score, r20      ; r1:r0 = score * 10
+    ldi r24, lo8(2000)
+    ldi r25, hi8(2000)
+    sub r24, r0         ; Kurangi nilai low byte
+    sbc r25, r1         ; Kurangi nilai high byte dengan carry
+    rcall buzzer_play_note     ; Update nada Buzzer secara real-time
+
 skip_encoder:
     ; --- 2. LOGIKA IKAN (DELAY & PULL) ---
-    ldi r24, lo8(50000)     ; Sesuaikan kecepatan ikan di sini
-    ldi r25, hi8(50000)
+    ldi r24, lo8(90000)     ; Sesuaikan kecepatan ikan di sini
+    ldi r25, hi8(90000)
 delay_fight:
     sbiw r24, 1
     brne delay_fight
@@ -162,7 +178,7 @@ check_strike:
     rcall oled_print_char
     rcall oled_print_char
     rcall motor_set_speed
-    rcall buzzer_on
+    rcall buzzer_play_note
     
     rjmp game_loop
 
